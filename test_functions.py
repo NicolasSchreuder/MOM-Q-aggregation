@@ -12,9 +12,23 @@ from Qagg import Q_aggregation
 
 def make_gaussian_regression(n_samples, d, noise_sd):
     """
+    Returns randomly generated features and targets
+    from Gaussian regression model : y = < X, t > + noise_sd*epsilon
+    with epsilon a standard Gaussian random variables
+    and t a Poisson random variable with mean 0.1
+
+    Parameters
+    ----------
+
     n_samples : int, number of samples
     d : int, number of features
     noise_sd : float, standard deviation of the noise
+
+    Returns
+    -------
+    X : 2D-array, feature matrix of shape (n_samples, d)
+    y : 1D-array, target vector of shape (n_samples,)
+
     """
     # Generate independent Gaussian features
     X = np.random.multivariate_normal(np.zeros(d), np.eye(d), n_samples)
@@ -28,20 +42,24 @@ def make_gaussian_regression(n_samples, d, noise_sd):
 
     return X, y
 
-def corrupt_dataset(X_agg, y_agg, prop_outliers, corruption_type='constant'):
+def corrupt_dataset(X_agg, y_agg, prop_outliers, corruption_params):
     """
     Corrupts a dataset by randomly changing the value of the target
     """
     n, d = X_agg.shape
 
+    # check if prop_outliers is indeed a proportion between 0 and 1
     assert prop_outliers >= 0 and prop_outliers <= 1
 
     n_outliers = int(prop_outliers*n)
 
+    # randomly pick indexes of targets to corrupt
     outliers_idx = np.random.choice(n, n_outliers, replace=False)
 
-    if corruption_type == 'constant':
-        y_agg[outliers_idx] = 50
+    if corruption_params['type'] == 'constant':
+        y_agg[outliers_idx] = corruption_params['value']
+    if corruption_params['type'] == 'uniform':
+        y_agg[outliers_idx] = np.random.uniform(np.min(y_agg), 5*np.max(y_agg))
 
     return X_agg, y_agg
 
@@ -101,7 +119,8 @@ def train_agg_test_split(X, y, train_size, agg_size, random_state=None):
     return X_train, X_agg, X_test, y_train, y_agg, y_test
 
 def test_gaussian_regression_outliers(n_samples, d, n_replications,
-                                      prop_outliers, agg_method='GMA1', noise_sd=0.5):
+                                      prop_outliers, corruption_params, agg_params,
+                                      noise_sd=0.5):
     """
     Test performance of aggregation method on gaussian regression example with outliers
     """
@@ -112,21 +131,21 @@ def test_gaussian_regression_outliers(n_samples, d, n_replications,
     for i in tqdm(range(n_replications)):
         X, y = make_gaussian_regression(n_samples, d, noise_sd)
 
-        X_train, X_agg, X_test, y_train, y_agg, y_test = train_agg_test_split(X, y, 0.4, 0.3)
+        X_train, X_agg, X_test, y_train, y_agg, y_test = train_agg_test_split(X, y, 0.2, 0.2)
 
         q = Q_aggregation(predictors)
 
         q.train_predictors(X_train, y_train)
 
-        X_agg, y_agg = corrupt_dataset(X_agg, y_agg, prop_outliers, corruption_type='constant')
+        X_agg, y_agg = corrupt_dataset(X_agg, y_agg, prop_outliers, corruption_params)
 
-        if agg_method == 'GMA_1':
-            q.GMA_1(X_agg, y_agg, 10)
+        if agg_params['method'] == 'GMA_1':
+            q.GMA_1(X_agg, y_agg, agg_params['nb_iterations'])
 
-        elif agg_method == 'GMA_1_MOM':
-            q.GMA_1_MOM(X_agg, y_agg, 10, 50)
+        elif agg_params['method'] == 'GMA_1_MOM':
+            q.GMA_1_MOM(X_agg, y_agg, agg_params['nb_iterations'], agg_params['nb_blocks'])
 
-        elif agg_method == 'IP_MOM':
+        elif agg_params['method'] == 'IP_MOM':
             q.IP_MOM(X_agg, y_agg, n_blocks=50, t=1, mu=5, tol=1e-1)
 
         else:
@@ -138,4 +157,4 @@ def test_gaussian_regression_outliers(n_samples, d, n_replications,
 
         regrets.append(MSE_agg - oracle_agg)
 
-    return regrets
+    return MSE_agg, regrets
